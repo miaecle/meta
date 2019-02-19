@@ -9,6 +9,7 @@ import numpy as np
 import pickle
 from similarity import load_samples, adjusted_mutual_information, adjusted_rand_index
 import numba
+import time
 
 @numba.jit(cache=True, nopython=True)
 def sample_from_discrete(prob):
@@ -107,18 +108,20 @@ if __name__ == '__main__':
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
   X, gene_names = preprocess_files(['../samples/summary_ERP002469.txt', 
                                     '../samples/summary_ERP003612.txt', 
-                                    '../samples/summary_ERP005989.txt'])
+                                    '../samples/summary_ERP005989.txt',
+                                    '../samples/summary_ERP008729.txt',
+                                    '../samples/summary_ERP010700.txt'])
 
-  k = 500
+  k = 1500
   alpha = 1./k
   w_j_ratio = 0.2
-  Z = initialize_Z(X, k, alpha)
-  #Z = pickle.load(open('temp_save_1.pkl', 'rb'))
+  #Z = initialize_Z(X, k, alpha)
+  Z = pickle.load(open('../utils/temp_save_1.pkl', 'rb'))
   assert Z.shape == X.shape
   for ct in range(100):
     #alpha = 1/100 * 0.96**ct #Annealing
     #w_j_ratio = 0.4 * 0.98**ct #Annealing
-
+    print("Start Iteration %d" % ct, flush=True)
     if ct > 0:
       Z_clusters = {}
       for i, z in enumerate(Z):
@@ -128,9 +131,11 @@ if __name__ == '__main__':
         Z_clusters[cluster_id].append(gene_names[i])
       print("On batch %d, alpha %f" % (ct, alpha))
       print(adjusted_rand_index('../samples/summary_ERP002469.txt', Z_clusters))
-      print(adjusted_rand_index(ground_truth_clusters, Z_clusters))
+      print(adjusted_rand_index(ground_truth_clusters, Z_clusters), flush=True)
     
-
+    t1 = time.time()
     Z = BCE(X, k, Z, alpha, w_j_ratio=w_j_ratio, n_epochs=20)
+    t2 = time.time()
+    print("Took %f seconds" % (t2-t1))
     with open('../utils/temp_save_1.pkl', 'wb') as f:
       pickle.dump(Z, f)
