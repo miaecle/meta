@@ -1,6 +1,6 @@
 import numpy as np
 import pickle
-from samples import valid_samples, merge_samples
+from samples import valid_samples, merge_samples, merge_samples_msp
 from similarity import load_samples, adjusted_mutual_information, adjusted_rand_index
 from BCE import generate_n_matrix, preprocess_files
 import numba
@@ -12,7 +12,7 @@ import multiprocessing as mp
 
 
 class MM(object):
-  def __init__(self, X, k, Z_init=None, prior=None, thetas=None):
+  def __init__(self, X, k, Z_init=None, prior=None, thetas=None, weights=None):
     self.X = X
     self.k = k
     self.M = X.shape[1] # n_exp
@@ -26,13 +26,26 @@ class MM(object):
       n_z = np.bincount(Z_init)
       prior = n_z/n_z.sum()
     self.prior = prior
+
+    if weights is None:
+      weights = [1.] * self.M
+    self.weights = weights
       
   def infer_zi(self, i):
     z_i = np.copy(self.prior)
     for j in range(self.M):
       if self.X[i, j] >= 0:
         z_i *= self.thetas[j][:, self.X[i, j]]
-    z_i = z_i/(z_i.sum() + 1e-5)
+    z_i = z_i/z_i.sum()
+    return z_i
+
+  def infer_zi2(self, i):
+    z_i = np.log(np.copy(self.prior))
+    for j in range(self.M):
+      if self.X[i, j] >= 0:
+        z_i += np.log(self.thetas[j][:, self.X[i, j]]) * self.weights[j]
+    z_i = np.exp(z_i - z_i.max())
+    z_i = z_i/z_i.sum()
     return z_i
 
 def EM(n_iter, mm, n_threads=None):
@@ -43,6 +56,7 @@ def EM(n_iter, mm, n_threads=None):
   cuts = np.linspace(0, len(inds)+1, n_threads+1)
   i_lists = [inds[int(cuts[i]):int(cuts[i+1])] for i in range(n_threads)]
   for epoch in range(n_iter):
+    print("Start iteration %d" % epoch)
     threadRoutine = partial(WorkerEM, MM=mm)
     res = pl.map(threadRoutine, i_lists)
     
@@ -142,7 +156,7 @@ def build_clusters(Z):
 if __name__ == '__main__':
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
-  file_list =['../summary/mspminer_%s.txt' % name for name in merge_samples]
+  file_list =['../summary/mspminer_%s.txt' % name for name in merge_samples_msp]
   X, gene_names = preprocess_files(file_list)
 
   n_threads = 4
@@ -161,9 +175,9 @@ if __name__ == '__main__':
 #  print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
   for ct in range(100):
-    print("Start Iteration %d" % ct, flush=True)
+    print("Start fold %d" % ct, flush=True)
     t1 = time.time()
-    EM(5, mm, n_threads=n_threads)
+    EM(2, mm, n_threads=n_threads)
     t2 = time.time()
     print("Took %f seconds" % (t2-t1))
     with open('../utils/MM_save/MM_save_%d.pkl' % ct, 'wb') as f:
@@ -173,5 +187,4 @@ if __name__ == '__main__':
     for f in file_list:
       print(f + "\t" + str(adjusted_rand_index(f, Z_clusters)))
     print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
-
 

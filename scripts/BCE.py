@@ -18,7 +18,6 @@ def sample_from_discrete(prob):
   sample = np.where((prob - np.random.rand()) <= 0)[0].shape[0]
   return sample
 
-@numba.jit(cache=True, nopython=True)
 def generate_n_matrix(z, x, k):
   N = x.shape[0]
   k_j = len(set(x))
