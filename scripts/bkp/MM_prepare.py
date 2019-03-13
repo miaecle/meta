@@ -1,6 +1,5 @@
 import numpy as np
 import pickle
-from samples import valid_samples, merge_samples, merge_samples_msp
 from similarity import load_samples, adjusted_mutual_information, adjusted_rand_index
 from BCE import generate_n_matrix, preprocess_files
 import numba
@@ -8,11 +7,12 @@ import time
 import threading
 from multiprocessing import Process, Pool
 from functools import partial
+from samples import valid_samples
 import multiprocessing as mp
 
 
 class MM(object):
-  def __init__(self, X, k, Z_init=None, prior=None, thetas=None, weights=None):
+  def __init__(self, X, k, Z_init=None, prior=None, thetas=None):
     self.X = X
     self.k = k
     self.M = X.shape[1] # n_exp
@@ -20,31 +20,16 @@ class MM(object):
 
     if thetas is None:
       n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(self.M)]
-      thetas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
-    self.thetas = thetas
+      self.thetas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
     if prior is None:
       n_z = np.bincount(Z_init)
-      prior = n_z/n_z.sum()
-    self.prior = prior
-
-    if weights is None:
-      weights = [1.] * self.M
-    self.weights = weights
+      self.prior = n_z/n_z.sum()
       
   def infer_zi(self, i):
     z_i = np.copy(self.prior)
     for j in range(self.M):
-      if self.X[i, j] >= 0:
+      if self.X[i, j] > 0:
         z_i *= self.thetas[j][:, self.X[i, j]]
-    z_i = z_i/z_i.sum()
-    return z_i
-
-  def infer_zi2(self, i):
-    z_i = np.log(np.copy(self.prior))
-    for j in range(self.M):
-      if self.X[i, j] >= 0:
-        z_i += np.log(self.thetas[j][:, self.X[i, j]]) * self.weights[j]
-    z_i = np.exp(z_i - z_i.max())
     z_i = z_i/z_i.sum()
     return z_i
 
@@ -56,7 +41,6 @@ def EM(n_iter, mm, n_threads=None):
   cuts = np.linspace(0, len(inds)+1, n_threads+1)
   i_lists = [inds[int(cuts[i]):int(cuts[i+1])] for i in range(n_threads)]
   for epoch in range(n_iter):
-    print("Start iteration %d" % epoch)
     threadRoutine = partial(WorkerEM, MM=mm)
     res = pl.map(threadRoutine, i_lists)
     
@@ -81,6 +65,7 @@ def WorkerEM(i_list, MM=None):
         new_thetas[j][:, MM.X[i, j]] += z_i
   return new_thetas, new_prior
 
+  
 def InferZ(mm, n_threads=None):
   if n_threads is None:
     n_threads = mp.cpu_count()
@@ -156,45 +141,18 @@ def build_clusters(Z):
 if __name__ == '__main__':
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
-  file_list =['../summary/mspminer_%s.txt' % name for name in merge_samples_msp]
+  file_list = ["../summary/mspminer_%s.txt" % s for s in valid_samples]
   X, gene_names = preprocess_files(file_list)
 
-  n_threads = 4
+  n_threads = 1
 
-  Z, k = initialize_Z(X, seed=147)
-  #Z = np.random.randint(0, k, (X.shape[0],))
-  #Z = None
-  #k = 1400
-  
-  prior = None
-  thetas = None
-  #prior, thetas = pickle.load(open('../utils/MM_save/MM_save_3.pkl', 'rb'))
+  # Seed 147 with initialization on ERP005989 has highest score
+  for seed in range(100, 150):
+    Z, k = initialize_Z(X, seed=seed)
+    with open("Z_full_init_%d.pkl" % seed, "wb") as f:
+      pickle.dump([Z, k], f)
 
-  print("k=%d" % k)
-  mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas)
-
-  Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
-  scores = []
-  for f in file_list:
-    scores.append(adjusted_rand_index(f, Z_clusters))
-    print(f + "\t" + str(scores[-1]))
-  print("Mean score\t" + str(np.mean(scores)))
-  print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
-
-  for ct in range(100):
-    print("Start fold %d" % ct, flush=True)
-    t1 = time.time()
-    EM(2, mm, n_threads=n_threads)
-    t2 = time.time()
-    print("Took %f seconds" % (t2-t1))
-    with open('../utils/MM_save/MM_save_%d.pkl' % ct, 'wb') as f:
-      pickle.dump([mm.prior, mm.thetas], f)
-
-    Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
-    scores = []
+    Z_clusters = build_clusters(Z)
     for f in file_list:
-      scores.append(adjusted_rand_index(f, Z_clusters))
-      print(f + "\t" + str(scores[-1]))
-    print("Mean score\t" + str(np.mean(scores)))
+      print(f + "\t" + str(adjusted_rand_index(f, Z_clusters)))
     print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
-
