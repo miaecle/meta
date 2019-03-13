@@ -20,17 +20,19 @@ class MM(object):
 
     if thetas is None:
       n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(self.M)]
-      self.thetas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
+      thetas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
+    self.thetas = thetas
     if prior is None:
       n_z = np.bincount(Z_init)
-      self.prior = n_z/n_z.sum()
+      prior = n_z/n_z.sum()
+    self.prior = prior
       
   def infer_zi(self, i):
     z_i = np.copy(self.prior)
     for j in range(self.M):
-      if self.X[i, j] > 0:
+      if self.X[i, j] >= 0:
         z_i *= self.thetas[j][:, self.X[i, j]]
-    z_i = z_i/z_i.sum()
+    z_i = z_i/(z_i.sum() + 1e-5)
     return z_i
 
 def EM(n_iter, mm, n_threads=None):
@@ -65,7 +67,6 @@ def WorkerEM(i_list, MM=None):
         new_thetas[j][:, MM.X[i, j]] += z_i
   return new_thetas, new_prior
 
-  
 def InferZ(mm, n_threads=None):
   if n_threads is None:
     n_threads = mp.cpu_count()
@@ -141,7 +142,7 @@ def build_clusters(Z):
 if __name__ == '__main__':
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
-  file_list =['../summary/canopy_%s_raw.txt' % name for name in merge_samples]
+  file_list =['../summary/mspminer_%s.txt' % name for name in merge_samples]
   X, gene_names = preprocess_files(file_list)
 
   n_threads = 4
@@ -154,15 +155,15 @@ if __name__ == '__main__':
   thetas = None
   mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas)
 
-  Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
-  for f in file_list:
-    print(f + "\t" + str(adjusted_rand_index(f, Z_clusters)))
-  print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
+#  Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
+#  for f in file_list:
+#    print(f + "\t" + str(adjusted_rand_index(f, Z_clusters)))
+#  print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
   for ct in range(100):
     print("Start Iteration %d" % ct, flush=True)
     t1 = time.time()
-    EM(2, mm, n_threads=n_threads)
+    EM(5, mm, n_threads=n_threads)
     t2 = time.time()
     print("Took %f seconds" % (t2-t1))
     with open('../utils/MM_save/MM_save_%d.pkl' % ct, 'wb') as f:

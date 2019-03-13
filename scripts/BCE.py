@@ -22,6 +22,8 @@ def sample_from_discrete(prob):
 def generate_n_matrix(z, x, k):
   N = x.shape[0]
   k_j = len(set(x))
+  if -1 in x:
+    k_j -= 1
   n_matrix = np.zeros((k, k_j))
   for i in range(N):
     if x[i] < 0:
