@@ -10,17 +10,33 @@ import numpy as np
 from scipy.special import comb, perm
 from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score
 
+def parse_line(line):
+  line = line[:-1].split(',')
+  gene_name = line[0]
+  cluster_assignments = line[1:]
+  assert len(cluster_assignments) > 0
+  if len(cluster_assignments) == 1:
+    cluster_id = int(cluster_assignments[0][1:])
+    return gene_name, cluster_id
+  else:
+    types = [c[0] for c in cluster_assignments]
+    if 'c' in types:
+      cluster_id = min([int(c[1:]) for c in cluster_assignments if c[0] == 'c'])
+      return gene_name, cluster_id
+    if 'a' in types:
+      cluster_id = min([int(c[1:]) for c in cluster_assignments if c[0] == 'a'])
+      return gene_name, cluster_id
+    cluster_id = min([int(c[1:]) for c in cluster_assignments])
+    return gene_name, cluster_id
+
 def load_samples(s1):
   clusters = {}
   with open(s1, 'r') as f:
     for line in f:
-      if line[-2] != ',':
-        numbers = line[:-1].split(',')
-        numbers = list(map(int, numbers))
-        for n in numbers[1:]:
-          if not n in clusters:
-            clusters[n] = []
-          clusters[n].append(numbers[0])
+      gene_name, cluster_id = parse_line(line)
+      if not cluster_id in clusters:
+        clusters[cluster_id] = []
+      clusters[cluster_id].append(gene_name)
   return clusters
 
 def contingency(s1, s2):
@@ -44,9 +60,9 @@ def contingency(s1, s2):
     genes2 = genes2 | s2[k2]
 
   shared_genes = genes1 & genes2
-  print("Number of genes in cohort 1: %d" % len(genes1))
-  print("Number of genes in cohort 2: %d" % len(genes2))
-  print("Number of genes shared: %d" % len(shared_genes))
+  #print("Number of genes in cohort 1: %d" % len(genes1))
+  #print("Number of genes in cohort 2: %d" % len(genes2))
+  #print("Number of genes shared: %d" % len(shared_genes))
   for i, k1 in enumerate(keys1):
     for j, k2 in enumerate(keys2):
       contingency_table[i, j] = len(s1[k1] & s2[k2] & shared_genes)
@@ -66,19 +82,19 @@ def cluster_labels(s1, s2):
     genes2 |= set(s2[k2])
 
   shared_genes = list(genes1 & genes2)
-  print("Number of genes in cohort 1: %d" % len(genes1))
-  print("Number of genes in cohort 2: %d" % len(genes2))
-  print("Number of genes shared: %d" % len(shared_genes))
+  #print("Number of genes in cohort 1: %d" % len(genes1))
+  #print("Number of genes in cohort 2: %d" % len(genes2))
+  #print("Number of genes shared: %d" % len(shared_genes))
   
   cluster1 = -np.ones(len(shared_genes))
   cluster2 = -np.ones(len(shared_genes))
   cl1 = {}
   cl2 = {}
   for i, key in enumerate(s1.keys()):
-    for g in set(s1[key]) & set(shared_genes):
+    for g in set(s1[key]):
         cl1[g] = i
   for i, key in enumerate(s2.keys()):
-    for g in set(s2[key]) & set(shared_genes):
+    for g in set(s2[key]):
         cl2[g] = i
   for i, g in enumerate(shared_genes):
     cluster1[i] = cl1[g]
@@ -135,3 +151,4 @@ def variation_of_information(s1, s2):
   NVI = 1 - 2*I/(H1 + H2)
   return NVI
   
+
