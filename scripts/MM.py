@@ -20,33 +20,32 @@ class MM(object):
 
     if thetas is None:
       n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(self.M)]
-      thetas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
+      thetas = [np.log(n_matrix/np.expand_dims(n_matrix.sum(1), 1)) for n_matrix in n_matrices]
     self.thetas = thetas
+    
     if prior is None:
       n_z = np.bincount(Z_init)
-      prior = n_z/n_z.sum()
+      prior = np.log(n_z/n_z.sum())
     self.prior = prior
 
     if weights is None:
       weights = [1.] * self.M
     self.weights = weights
-      
-  def infer_zi(self, i):
+
+  def infer_zi(self, i, logL=False):
     z_i = np.copy(self.prior)
     for j in range(self.M):
       if self.X[i, j] >= 0:
-        z_i *= self.thetas[j][:, self.X[i, j]]
-    z_i = z_i/z_i.sum()
-    return z_i
-
-  def infer_zi2(self, i):
-    z_i = np.log(np.copy(self.prior))
-    for j in range(self.M):
-      if self.X[i, j] >= 0:
-        z_i += np.log(self.thetas[j][:, self.X[i, j]]) * self.weights[j]
+        z_i += self.thetas[j][:, self.X[i, j]] * self.weights[j]
+    if logL:
+      logL_i = np.copy(z_i)
     z_i = np.exp(z_i - z_i.max())
     z_i = z_i/z_i.sum()
-    return z_i
+    if logL:
+      logL_i = np.sum(logL_i * z_i)
+      return z_i, logL_i
+    else:
+      return z_i
 
 def EM(n_iter, mm, n_threads=None):
   if n_threads is None:
@@ -59,20 +58,26 @@ def EM(n_iter, mm, n_threads=None):
     print("Start iteration %d" % epoch)
     threadRoutine = partial(WorkerEM, MM=mm)
     res = pl.map(threadRoutine, i_lists)
-    
+
     new_prior = sum([r[1] for r in res])
-    assert np.allclose(new_prior.sum(), mm.N)    
+    assert np.allclose(new_prior.sum(), mm.N)
     all_new_thetas = [r[0] for r in res]
     new_thetas = [sum([p[i] for p in all_new_thetas]) for i in range(mm.M)]
     for i, theta in enumerate(new_thetas):
       assert np.allclose(theta.sum(), np.where(mm.X[:, i] >= 0)[0].shape[0])
 
-    mm.prior = new_prior/new_prior.sum()
-    mm.thetas = [mat/np.expand_dims(mat.sum(1), 1) for mat in new_thetas]
+    mm.prior = np.log(new_prior/new_prior.sum())
+    update_thetas = []
+    for mat in new_thetas:
+      mat += 1e-10/mat.size
+      normed_mat = mat/np.expand_dims(mat.sum(1), 1)
+      update_thetas.append(np.log(normed_mat))
+    mm.thetas = update_thetas
 
 def WorkerEM(i_list, MM=None):
   new_thetas = [np.zeros_like(item) for item in MM.thetas]
   new_prior = np.zeros_like(MM.prior)
+
   for i in i_list:
     z_i = MM.infer_zi(i)
     new_prior += z_i
@@ -100,12 +105,12 @@ def InferZ(mm, n_threads=None):
 
 def WorkerInferZ(i_list, MM=None):
   Zs = [None] * len(i_list)
-  logProb = 0.
+  logL = 0.
   for ind, i in enumerate(i_list):
-    z_i = MM.infer_zi(i)
+    z_i, logL_i = MM.infer_zi(i, logL=True)
     Zs[ind] = np.argmax(z_i)
-    logProb += np.log(np.max(z_i))
-  return Zs, logProb
+    logL += logL_i
+  return Zs, logL
 
 def initialize_Z(X, seed=None):
   if not seed is None:
@@ -140,11 +145,11 @@ def initialize_Z(X, seed=None):
             Z[k] = j_assign
   assert not -1 in Z
   assert len(np.unique(Z)) == np.max(Z) + 1
-  
+
   k = np.max(Z) + 1
   return Z, k
 
-def build_clusters(Z):
+def build_clusters(Z, gene_names):
   Z_clusters = {}
   for i, z in enumerate(Z):
     cluster_id = z
@@ -153,32 +158,47 @@ def build_clusters(Z):
     Z_clusters[cluster_id].append(gene_names[i])
   return Z_clusters
 
+def load_cohort_sizes(sample_lists, path='../utils/cohort_samples.csv'):
+  mapping = {}
+  with open(path, 'r') as f:
+    for line in f:
+      line = line[:-1]
+      mapping[line.split(',')[0]] = int(line.split(',')[1])
+  return [mapping[name] for name in sample_lists]
+
 if __name__ == '__main__':
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
-  file_list =['../summary/mspminer_%s.txt' % name for name in merge_samples_msp]
-  X, gene_names = preprocess_files(file_list)
-
+  samples = merge_samples_msp
   n_threads = 4
 
-  Z, k = initialize_Z(X, seed=147)
-  #Z = np.random.randint(0, k, (X.shape[0],))
-  #Z = None
-  #k = 1400
+  file_list =['../summary/mspminer_%s.txt' % name for name in samples]
+  #X, gene_names = preprocess_files(file_list)
+  X, gene_names = pickle.load(open('../summary/mspminer_X.pkl', 'rb'))
+  cohort_sizes = load_cohort_sizes(samples)
+
+  # Cohorts have weight related to their sizes, 0.3 is a scaling factor
+  sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
   
-  prior = None
-  thetas = None
-  #prior, thetas = pickle.load(open('../utils/MM_save/MM_save_3.pkl', 'rb'))
+  k = 1314
+  #Z, k = initialize_Z(X, seed=147)
+  #Z = np.random.randint(0, k, (X.shape[0],))
+  Z = None
+
+  #prior = None
+  #thetas = None
+  prior, thetas = pickle.load(open('../utils/MM_save/MM_save_9.pkl', 'rb'))
 
   print("k=%d" % k)
-  mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas)
+  mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas, weights=sample_weights)
 
-  Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
+  Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads), gene_names)
   scores = []
   for f in file_list:
     scores.append(adjusted_rand_index(f, Z_clusters))
     print(f + "\t" + str(scores[-1]))
-  print("Mean score\t" + str(np.mean(scores)))
+  print("Mean score\t" + str(np.mean(np.array(scores))))
+  print("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
   print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
   for ct in range(100):
@@ -190,11 +210,13 @@ if __name__ == '__main__':
     with open('../utils/MM_save/MM_save_%d.pkl' % ct, 'wb') as f:
       pickle.dump([mm.prior, mm.thetas], f)
 
-    Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads))
+    Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads), gene_names)
     scores = []
     for f in file_list:
       scores.append(adjusted_rand_index(f, Z_clusters))
       print(f + "\t" + str(scores[-1]))
-    print("Mean score\t" + str(np.mean(scores)))
+    print("Mean score\t" + str(np.mean(np.array(scores))))
+    print("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
     print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
+
 
