@@ -60,9 +60,7 @@ def contingency(s1, s2):
     genes2 = genes2 | s2[k2]
 
   shared_genes = genes1 & genes2
-  #print("Number of genes in cohort 1: %d" % len(genes1))
-  #print("Number of genes in cohort 2: %d" % len(genes2))
-  #print("Number of genes shared: %d" % len(shared_genes))
+  print("Number of genes: %d\t%d\t%d" % (len(genes1), len(genes2), len(shared_genes)))
   for i, k1 in enumerate(keys1):
     for j, k2 in enumerate(keys2):
       contingency_table[i, j] = len(s1[k1] & s2[k2] & shared_genes)
@@ -82,9 +80,7 @@ def cluster_labels(s1, s2):
     genes2 |= set(s2[k2])
 
   shared_genes = list(genes1 & genes2)
-  #print("Number of genes in cohort 1: %d" % len(genes1))
-  #print("Number of genes in cohort 2: %d" % len(genes2))
-  #print("Number of genes shared: %d" % len(shared_genes))
+  print("Number of genes: %d\t%d\t%d" % (len(genes1), len(genes2), len(shared_genes)))
   
   cluster1 = -np.ones(len(shared_genes))
   cluster2 = -np.ones(len(shared_genes))

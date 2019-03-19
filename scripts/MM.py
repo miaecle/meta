@@ -149,6 +149,46 @@ def initialize_Z(X, seed=None):
   k = np.max(Z) + 1
   return Z, k
 
+def initialize_Z_spread(X, seed=None):
+  if not seed is None:
+    np.random.seed(seed)
+
+  order = np.arange(X.shape[1])
+  np.random.shuffle(order)
+  Z = np.copy(X[:, order[0]])
+  for i in order[1:]:
+    update_positions = set(list(np.where(Z < 0)[0])) & \
+        set(list(np.where(X[:, i] >= 0)[0]))
+    for j in update_positions:
+      if Z[j] < 0:
+        assign = X[j, i]
+        assert assign >= 0
+        points_in_this_cluster = np.where(X[:, i] == assign)[0]
+        existing_cluster_assignments = [Z[p] for p in points_in_this_cluster if Z[p] >= 0]
+        if len(existing_cluster_assignments) < 20:
+          existing_cluster_assignments.append(np.max(Z) + 1) # Assignment to a new cluster
+        _, existing_cts = np.unique(existing_cluster_assignments, return_counts=True)
+        max_ct = np.max(existing_cts)
+
+
+        missing_assignments = [p for p in points_in_this_cluster if Z[p] < 0]
+        assert not -1 in existing_cluster_assignments
+        assert j in missing_assignments
+
+        if len(missing_assignments) > 0.3*max_ct: # When large number of unlabelled points are present, assign them to the same cluster
+          j_assign = np.max(Z) + 1
+          for k in missing_assignments:
+            Z[k] = j_assign
+        else:
+          for k in missing_assignments:
+            j_assign = np.random.choice(existing_cluster_assignments)
+            Z[k] = j_assign
+  assert not -1 in Z
+  assert len(np.unique(Z)) == np.max(Z) + 1
+
+  k = np.max(Z) + 1
+  return Z, k
+
 def build_clusters(Z, gene_names):
   Z_clusters = {}
   for i, z in enumerate(Z):
@@ -180,14 +220,15 @@ if __name__ == '__main__':
   # Cohorts have weight related to their sizes, 0.3 is a scaling factor
   sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
   
-  k = 1314
+  #k = 1314
   #Z, k = initialize_Z(X, seed=147)
+  Z, k = pickle.load(open('../utils/Z_full_init_147_spreaded.pkl', 'rb'))
   #Z = np.random.randint(0, k, (X.shape[0],))
-  Z = None
+  #Z = None
 
-  #prior = None
-  #thetas = None
-  prior, thetas = pickle.load(open('../utils/MM_save/MM_save_9.pkl', 'rb'))
+  prior = None
+  thetas = None
+  #prior, thetas = pickle.load(open('../utils/MM_save/bkp/MM_init_on_147_k=1314.pkl', 'rb'))
 
   print("k=%d" % k)
   mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas, weights=sample_weights)
@@ -201,10 +242,10 @@ if __name__ == '__main__':
   print("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
   print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
-  for ct in range(100):
+  for ct in range(10):
     print("Start fold %d" % ct, flush=True)
     t1 = time.time()
-    EM(2, mm, n_threads=n_threads)
+    EM(1, mm, n_threads=n_threads)
     t2 = time.time()
     print("Took %f seconds" % (t2-t1))
     with open('../utils/MM_save/MM_save_%d.pkl' % ct, 'wb') as f:
