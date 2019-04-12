@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 from samples import valid_samples, merge_samples, merge_samples_msp
-from similarity import load_samples, adjusted_mutual_information, adjusted_rand_index
+from similarity import load_samples, adjusted_rand_index
 from BCE import generate_n_matrix, preprocess_files
 import numba
 import time
@@ -222,7 +222,7 @@ if __name__ == '__main__':
   
   #k = 1314
   #Z, k = initialize_Z(X, seed=147)
-  Z, k = pickle.load(open('../utils/Z_full_init_147_spreaded.pkl', 'rb'))
+  Z, k = pickle.load(open('../utils/Z_full_init_123_spreaded.pkl', 'rb'))
   #Z = np.random.randint(0, k, (X.shape[0],))
   #Z = None
 

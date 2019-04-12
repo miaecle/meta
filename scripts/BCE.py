@@ -7,7 +7,7 @@ Created on Mon Jan 28 23:46:00 2019
 """
 import numpy as np
 import pickle
-from similarity import load_samples, adjusted_mutual_information, adjusted_rand_index
+from similarity import load_samples, adjusted_rand_index
 import numba
 import time
 

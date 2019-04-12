@@ -32,3 +32,21 @@ def plot_similarity_matrix(f):
   plt.colorbar()
   plt.savefig('temp.png', dpi=600)
   
+  
+  
+################################################
+import pickle
+
+prior, thetas = pickle.load(open('../MM_init_on_147_k=4004.pkl', 'rb'))
+Z = pickle.load(open('../Z.pkl', 'rb'))
+
+Z_, cts = np.unique(Z, return_counts=True)
+Z_ = Z_[np.where(cts > 100)]
+
+for i, theta in enumerate(thetas):
+  mat = np.exp(theta[Z_])
+  order = sorted(np.arange(mat.shape[0]), key=lambda x: np.argmax(mat[x]))
+  plt.clf()
+  plt.imshow(mat[order])
+  plt.savefig('%d.png' % i, dpi=600)
+  
