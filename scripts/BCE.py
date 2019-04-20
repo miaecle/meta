@@ -73,7 +73,7 @@ def BCE(X, k, Z, alpha, w_j_ratio=0.4, n_epochs=10):
     print(logp)  
   return Z
 
-def preprocess_files(file_list):
+def preprocess_files(file_list, threshold=0):
   genes = {}
   n_clusterings = len(file_list)
   for i, f_n in enumerate(file_list):
@@ -85,7 +85,7 @@ def preprocess_files(file_list):
         genes[g][i] = ind_key
 
   gene_names = sorted(genes.keys())
-  selected_genes = [g for g in gene_names if np.where(genes[g] >= 0)[0].size > 0] # Filter genes with too sparse entries
+  selected_genes = [g for g in gene_names if np.where(genes[g] >= 0)[0].size > threshold] # Filter genes with too sparse entries
   B = np.stack([genes[g] for g in selected_genes], 0)
   for j in range(B.shape[1]):
     group_ids = np.unique(B[:, j])
