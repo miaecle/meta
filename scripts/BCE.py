@@ -10,6 +10,7 @@ import pickle
 from similarity import load_samples, adjusted_rand_index
 import numba
 import time
+import scipy
 
 @numba.jit(cache=True, nopython=True)
 def sample_from_discrete(prob):
@@ -30,47 +31,29 @@ def generate_n_matrix(z, x, k):
     n_matrix[z[i], x[i]] += 1
   return n_matrix, k_j
 
-@numba.jit(cache=True, nopython=True)
-def BCE(X, k, Z, alpha, w_j_ratio=0.4, n_epochs=10):
+def BCE(X, k, Z_init=None, alpha=None, betas=None, n_iter=10):
   M = X.shape[1]
   N = X.shape[0]
 
-  # Preprocessing
-  alpha = np.ones((k,)) * alpha
 
-  n_matrices = [generate_n_matrix(Z[:, i], X[:, i], k) for i in range(M)]
-  k_js = [pair[1] for pair in n_matrices]
-  w_js = [N/k_j/k_j*w_j_ratio for k_j in k_js]
-  n_matrices = [pair[0] for pair in n_matrices]
+  if betas is None:
+    n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(M)]
+    betas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
+  
+  if alpha is None:
+    alpha = np.bincount(Z_init) + 1
 
-  # Gibbs Sampler
-  n_matrices_sum = [nm.sum(1) for nm in n_matrices]
-  for epoch in range(n_epochs):
-    print(epoch)
-    logp = 0.
+  for it_ct in range(n_iter)
+    print(it_ct)
+    gammas = []
+    phis = []
     for i in range(N):
-      n_z = np.zeros((k,))
-      n_z[:(Z[i].max()+1)] = np.bincount(Z[i])
-      for j in range(M):
-        if X[i, j] >= 0:
-          n_matrices[j][Z[i, j], X[i, j]] -= 1
-          n_matrices_sum[j][Z[i, j]] -= 1
-        n_z[Z[i, j]] -= 1
-
-        if X[i, j] >= 0:
-          p1 = (w_js[j] + n_matrices[j][:, X[i, j]]) / (k_js[j] * w_js[j] + n_matrices_sum[j])
-        else:
-          p1 = np.ones((k,)) # Placeholder for missing entries
-        p2 = (alpha + n_z)/(k * alpha + (M - 1))
-        prob = p1 * p2
-        prob = prob / prob.sum()
-        Z[i, j] = sample_from_discrete(prob)
-        logp += np.log(prob[Z[i, j]])
-        if X[i, j] >= 0:
-          n_matrices[j][Z[i, j], X[i, j]] += 1
-          n_matrices_sum[j][Z[i, j]] += 1
-        n_z[Z[i, j]] += 1
-    print(logp)  
+      gamma_i = alpha
+      phi_i = np.zeros((M, k))
+      phi_i += scipy.special.digamma(gamma_i) - scipy.special.digamma(gamma_i.sum()) +
+               
+      phi_i = 
+    
   return Z
 
 def preprocess_files(file_list, threshold=0):
