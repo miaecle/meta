@@ -213,14 +213,15 @@ if __name__ == '__main__':
   n_threads = 4
 
 
-  seed = 147
+  seed = 147 #26
   file_list =['../summary/mspminer_%s.txt' % name for name in samples]
   cohort_sizes = load_cohort_sizes(samples)
   sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
   
-  of = open('../utils/MM_save/record.txt', 'w')
-  for thr in range(10):
-    of.write('THRESHOLD: %d' % thr)
+  for thr in range(1, 4):
+    of = open('../utils/MM_save/record.txt', 'a', buffering=1)
+    of.write('THRESHOLD: %d\n' % thr)
+    print('THRESHOLD: %d' % thr)
     
     X, gene_names = pickle.load(open('../summary/mspminer_X_%d.pkl' % thr, 'rb'))
     Z, k = initialize_Z(X, seed=seed)
@@ -228,25 +229,27 @@ if __name__ == '__main__':
     prior = None
     thetas = None
 
-
-    of.write("k=%d" % k)
+    of.write("k=%d\n" % k)
     mm = MM(X, k, Z_init=Z, prior=prior, thetas=thetas, weights=sample_weights)
     Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads), gene_names)
     scores = []
     for f in file_list:
       scores.append(adjusted_rand_index(f, Z_clusters))
       print(f + "\t" + str(scores[-1]))
-    of.write("Mean score\t" + str(np.mean(np.array(scores))))
-    of.write("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
-    of.write("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)))
-  
+    of.write("Mean score\t" + str(np.mean(np.array(scores))) + '\n')
+    of.write("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)) + '\n')
+    of.write("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters))+ '\n')
+    of.close()
+ 
     for ct in range(10):
-      of.write("Start fold %d" % ct)
+      of = open('../utils/MM_save/record.txt', 'a', buffering=1)
+      of.write("Start fold %d\n" % ct)
+      print("Start fold %d" % ct)
       t1 = time.time()
       EM(1, mm, n_threads=n_threads)
       t2 = time.time()
-      of.write("Took %f seconds" % (t2-t1))
-      with open('../utils/MM_save/MM_save_4_%d.pkl' % ct, 'wb') as f:
+      of.write("Took %f seconds\n" % (t2-t1))
+      with open('../utils/MM_save/MM_save_%d_%d.pkl' % (thr, ct), 'wb') as f:
         pickle.dump([mm.prior, mm.thetas], f)
   
       Z_clusters = build_clusters(InferZ(mm, n_threads=n_threads), gene_names)
@@ -254,8 +257,11 @@ if __name__ == '__main__':
       for f in file_list:
         scores.append(adjusted_rand_index(f, Z_clusters))
         print(f + "\t" + str(scores[-1]))
-      of.write("Mean score\t" + str(np.mean(np.array(scores))))
-      of.write("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
-      of.write("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)))
+      of.write("Mean score\t" + str(np.mean(np.array(scores))) + '\n')
+      of.write("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)) + '\n')
+      of.write("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters))+ '\n')
+      of.close()
 
+    of = open('../utils/MM_save/record.txt', 'a', buffering=1)
     of.write('\n\n')
+    of.close()

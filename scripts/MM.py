@@ -221,7 +221,7 @@ if __name__ == '__main__':
   sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
   
   #k = 1314
-  Z, k = initialize_Z(X, seed=147)
+  Z, k = initialize_Z(X, seed=147) # seed=26
   #Z, k = pickle.load(open('../utils/Z_full_init_123_spreaded.pkl', 'rb'))
   #Z = np.random.randint(0, k, (X.shape[0],))
   #Z = None
