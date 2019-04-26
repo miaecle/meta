@@ -123,7 +123,7 @@ if __name__ == '__main__':
       help='Threshold for input genes')
   
   args = parser.parse_args()
-  thr = int(args.thr)
+  thr = int(args.thr[0])
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
   samples = merge_samples_msp

@@ -18,8 +18,8 @@ from functools import partial
 import multiprocessing as mp
 import argparse
 
-
 from scipy.special import digamma, polygamma
+from scipy.stats import dirichlet
 
 @numba.jit(cache=True, nopython=True)
 def sample_from_discrete(prob):
@@ -162,98 +162,172 @@ def load_cohort_sizes(sample_lists, path='../utils/cohort_samples.csv'):
       mapping[line.split(',')[0]] = int(line.split(',')[1])
   return [mapping[name] for name in sample_lists]
 
+class BCE(object):
+  def __init__(self, X, k, Z_init=None, alpha=None, betas=None, weights=None):
+    self.X = X
+    self.k = k
+    self.M = X.shape[1] # n_exp
+    self.N = X.shape[0] # n_genes
 
-def BCE(X, k, Z_init=None, alpha=None, betas=None, n_iter=10):
-  M = X.shape[1]
-  N = X.shape[0]
-
-
-  if betas is None:
-    n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(M)]
-    betas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
-  
-  if alpha is None:
-    alpha = np.bincount(Z_init) + 1
-  
-  alpha = alpha/alpha.sum() * k
-  
-  for it_ct in range(n_iter):
-    print(it_ct)
-    new_betas = [np.zeros_like(b) for b in betas]
+    if betas is None:
+      n_matrices = [generate_n_matrix(Z_init, X[:, i], k)[0] + 1 for i in range(self.M)]
+      betas = [n_matrix/np.expand_dims(n_matrix.sum(1), 1) for n_matrix in n_matrices]
+    self.log_betas = [np.log(b) for b in betas]
     
-    ghs = N*(digamma(alpha.sum()) - digamma(alpha))
-    lhs = -N * polygamma(1, alpha)
-    v = N * polygamma(1, alpha.sum())
+    if alpha is None:
+      alpha = np.bincount(Z_init) + 1
+    self.alpha = alpha
+    self.prior = digamma(self.alpha) - digamma(self.alpha.sum())
     
-    for i in range(N):
-      phi_i = np.zeros((M, k))
-      phi_i += digamma(alpha) - digamma(alpha.sum())
-      for j in range(M):
-        if X[i, j] >= 0:
-          phi_i[j] += np.log(betas[j][:, X[i, j]])
-      
-      phi_i = np.exp(phi_i)
-      phi_i = phi_i/np.sum(phi_i, 1, keepdims=True)
-      
-      for j in range(M):
-        new_betas[j][:, X[i, j]] += phi_i[j]
-        
-      gamma_i = alpha + phi_i.sum(0)
-      ghs += digamma(gamma_i) - digamma(gamma_i.sum())
-      
-    betas = [b/b.sum(1, keepdims=True) for b in new_betas]
+    if weights is None:
+      weights = [1.] * self.M
+    self.weights = weights
+
+
+  def infer_zi(self, i):
+    phi_i = np.zeros((self.M, self.k))
+    phi_i += self.prior
+    zs = []
+    for j in range(self.M):
+      if X[i, j] >= 0:
+        phi_i[j] += self.log_betas[j][:, X[i, j]]
+        zs.append(np.argmax(phi_i[j]))
+    return np.random.choice(zs)
+  
+  def infer_phi_i(self, i):
+    phi_i = np.zeros((self.M, self.k))
+    phi_i += self.prior
+    for j in range(self.M):
+      if X[i, j] >= 0:
+        phi_i[j] += self.log_betas[j][:, X[i, j]]
+    
+    phi_i = np.exp(phi_i)
+    phi_i = phi_i/np.sum(phi_i, 1, keepdims=True)
+    return phi_i
+
+
+def EM_BCE(n_iter, bce, n_threads=None):
+  if n_threads is None:
+    n_threads = mp.cpu_count()
+  pl = Pool(n_threads)
+  inds = np.arange(bce.N)
+  cuts = np.linspace(0, len(inds)+1, n_threads+1)
+  i_lists = [inds[int(cuts[i]):int(cuts[i+1])] for i in range(n_threads)]
+  for epoch in range(n_iter):
+    print("Start iteration %d" % epoch)
+    threadRoutine = partial(WorkerEM_BCE, bce=bce)
+    res = pl.map(threadRoutine, i_lists)
+
+    all_new_betas = [r[0] for r in res]
+    new_betas = [sum([p[i] for p in all_new_betas]) for i in range(bce.M)]
+
+    alpha = bce.alpha
+    lhs = -bce.N * polygamma(1, alpha)
+    v = bce.N * polygamma(1, alpha.sum())    
+    ghs = bce.N*(digamma(alpha.sum()) - digamma(alpha))    
+    for r in res:
+      ghs_segment = r[1]
+      ghs += ghs_segment
     c = (ghs/lhs).sum()/(v**(-1.0) + (lhs**(-1.0)).sum())
-    alpha = alpha - (ghs - c)/lhs
     
-  return alpha, betas
+    betas = [b/b.sum(1, keepdims=True) for b in new_betas]
+    alpha = alpha - (ghs - c)/lhs
+
+    bce.alpha = alpha
+    bce.prior = digamma(alpha) - digamma(alpha.sum())
+    bce.log_betas = [np.log(b) for b in betas]
+
+def WorkerEM_BCE(i_list, bce=None):
+  M = bce.M
+  ghs = 0.
+  new_betas = [np.zeros_like(b) for b in bce.log_betas]
+  for i in i_list:
+    phi_i = bce.infer_phi_i(i)
+    gamma_i = alpha + phi_i.sum(0)
+    for j in range(M):
+      new_betas[j][:, X[i, j]] += phi_i[j]      
+    ghs += digamma(gamma_i) - digamma(gamma_i.sum())
+  return new_betas, ghs
+
+def InferZ_BCE(bce, n_threads=None):
+  if n_threads is None:
+    n_threads = mp.cpu_count()
+  inds = np.arange(bce.N)
+  cuts = np.linspace(0, len(inds)+1, n_threads+1)
+  i_lists = [inds[int(cuts[i]):int(cuts[i+1])] for i in range(n_threads)]
+  threadRoutine = partial(WorkerInferZ_BCE, bce=bce)
+  with Pool(n_threads) as p:
+    res = p.map(threadRoutine, i_lists)
+  Z = []
+  for r in res:
+    Z.extend(r)
+  return Z
+
+def WorkerInferZ_BCE(i_list, bce=None):
+  Zs = [None] * len(i_list)
+  for ind, i in enumerate(i_list):
+    z_i = bce.infer_zi(i)
+    Zs[ind] = z_i
+  return Zs
 
 if __name__ == '__main__':
+
+  parser = argparse.ArgumentParser(description='MM for ensemble clustering')
+  parser.add_argument(
+      '-n',
+      action='append',
+      dest='thr',
+      default=[],
+      help='Threshold for input genes')
+  
+  args = parser.parse_args()
+  thr = int(args.thr)
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
   samples = merge_samples_msp
   n_threads = 4
 
   file_list =['../summary/mspminer_%s.txt' % name for name in samples]
-  #X, gene_names = preprocess_files(file_list)
-  X, gene_names = pickle.load(open('../summary/mspminer_X_4.pkl', 'rb'))
+  #X, gene_names = preprocess_files(file_list, threshold=thr)
+  X, gene_names = pickle.load(open('../summary/mspminer_X_%d.pkl' % thr, 'rb'))
   cohort_sizes = load_cohort_sizes(samples)
 
   # Cohorts have weight related to their sizes, 0.3 is a scaling factor
   sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
   
-  #k = 1314
-  Z, k = initialize_Z(X, seed=147) # seed=26
+  Z, k = initialize_Z(X, seed=26)
   #Z, k = pickle.load(open('../utils/Z_full_init_123_spreaded.pkl', 'rb'))
-  #Z = np.random.randint(0, k, (X.shape[0],))
   #Z = None
 
   alpha = None
   betas = None
   
+  bce = BCE(X, k, Z_init=Z, sample_weights=sample_weights)
 
+  Z_clusters = build_clusters(InferZ_BCE(bce, n_threads=n_threads), gene_names)
+  scores = []
+  for f in file_list:
+    scores.append(adjusted_rand_index(f, Z_clusters))
+    print(f + "\t" + str(scores[-1]))
+  print("Mean score\t" + str(np.mean(np.array(scores))))
+  print("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
+  print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
-
-  #Z = pickle.load(open('../utils/temp_save_1.pkl', 'rb'))
-  assert Z.shape == X.shape
-  for ct in range(100):
-    #alpha = 1/(0.2*k) * 0.96**ct #Annealing
-    #w_j_ratio = 0.4 * 0.98**ct #Annealing
-    print("Start Iteration %d" % ct, flush=True)
-    Z_clusters = {}
-    for i, z in enumerate(Z):
-      #cluster_id = np.random.choice(z) # Randomly select one out of M assignment\
-      vals, counts = np.unique(Z[i], return_counts=True)
-      cluster_id = vals[np.argmax(counts)]
-      if cluster_id not in Z_clusters:
-        Z_clusters[cluster_id] = []
-      Z_clusters[cluster_id].append(gene_names[i])
-    print("On batch %d" % ct)
-    for f in file_list:
-      print(f + "\t" + str(adjusted_rand_index(f, Z_clusters)))
-    print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
-
+  for ct in range(10):
+    print("Start fold %d" % ct, flush=True)
     t1 = time.time()
-    alpha, betas = BCE(X, k, Z, n_epochs=10)
+    EM_BCE(1, bce, n_threads=n_threads)
     t2 = time.time()
     print("Took %f seconds" % (t2-t1))
+    with open('../utils/BCE_save/BCE_save_%d_%d.pkl' % (thr, ct), 'wb') as f:
+      pickle.dump([bce.alpha, bce.log_betas], f)
+
+    Z_clusters = build_clusters(InferZ_BCE(bce, n_threads=n_threads), gene_names)
+    scores = []
+    for f in file_list:
+      scores.append(adjusted_rand_index(f, Z_clusters))
+      print(f + "\t" + str(scores[-1]))
+    print("Mean score\t" + str(np.mean(np.array(scores))))
+    print("Mean score\t" + str(np.sum(np.array(scores) * np.array(cohort_sizes))/np.sum(cohort_sizes)))
+    print("Ground Truth\t" + str(adjusted_rand_index(ground_truth_clusters, Z_clusters)), flush=True)
 
