@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 from samples import valid_samples, merge_samples, merge_samples_msp
 from similarity import load_samples, adjusted_rand_index
-from BCE import generate_n_matrix, preprocess_files, initialize_Z, initialize_Z_spread, build_clusters, load_cohort_sizes
+from BCE import generate_n_matrix, preprocess_files, initialize_Z, initialize_Z_spread, build_clusters, load_cohort_sizes, load_inter_cohort_consistency
 import time
 import threading
 from multiprocessing import Process, Pool
@@ -133,9 +133,11 @@ if __name__ == '__main__':
   #X, gene_names = preprocess_files(file_list, threshold=thr)
   X, gene_names = pickle.load(open('../summary/mspminer_X_%d.pkl' % thr, 'rb'))
   cohort_sizes = load_cohort_sizes(samples)
+  consistency_mat = np.mean(load_inter_cohort_consistency(merge_samples_msp), 0)
 
   # Cohorts have weight related to their sizes, 0.3 is a scaling factor
-  sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
+  #sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
+  sample_weights = (consistency_mat ** 4)/(consistency_mat.max() ** 4)
   
   Z, k = initialize_Z(X, seed=26)
   #Z, k = pickle.load(open('../utils/Z_full_init_123_spreaded.pkl', 'rb'))

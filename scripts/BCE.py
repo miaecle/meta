@@ -6,6 +6,7 @@ Created on Mon Jan 28 23:46:00 2019
 @author: zqwu
 """
 import numpy as np
+import pandas as pd
 import pickle
 from similarity import load_samples, adjusted_rand_index
 from samples import valid_samples, merge_samples, merge_samples_msp
@@ -162,6 +163,20 @@ def load_cohort_sizes(sample_lists, path='../utils/cohort_samples.csv'):
       mapping[line.split(',')[0]] = int(line.split(',')[1])
   return [mapping[name] for name in sample_lists]
 
+def load_inter_cohort_consistency(samples=merge_samples_msp, tab='../utils/similarity_summary_mspminer.csv'):
+  df = np.array(pd.read_csv(tab))
+  n_cohorts = df.shape[0]
+  assert df.shape[1] == df.shape[0] + 2
+  
+  mat = df[:, 2:]
+  mat[np.where(mat <= 0)] = 0
+  mat += np.transpose(mat)
+  np.fill_diagonal(mat, 1)
+
+  names = list(df[:, 0])
+  order = [names.index(n) for n in samples]
+  return mat[np.array(order), :][:, np.array(order)]
+
 class BCE(object):
   def __init__(self, X, k, Z_init=None, alpha=None, betas=None, weights=None):
     self.X = X
@@ -175,9 +190,8 @@ class BCE(object):
     self.log_betas = [np.log(b) for b in betas]
     
     if alpha is None:
-      alpha = np.bincount(Z_init) + 1
+      alpha = np.ones((self.k,))
     self.alpha = alpha
-    self.prior = digamma(self.alpha) - digamma(self.alpha.sum())
     
     if weights is None:
       weights = [1.] * self.M
@@ -185,25 +199,41 @@ class BCE(object):
 
 
   def infer_zi(self, i):
-    phi_i = np.zeros((self.M, self.k))
-    phi_i += self.prior
+    phi_i, gamma_i = self.infer_phi_i(i)
     zs = []
     for j in range(self.M):
-      if X[i, j] >= 0:
-        phi_i[j] += self.log_betas[j][:, X[i, j]]
+      if self.X[i, j] >= 0:
         zs.append(np.argmax(phi_i[j]))
     return np.random.choice(zs)
   
   def infer_phi_i(self, i):
+    gamma_i = self.alpha
+    diff = 1.
     phi_i = np.zeros((self.M, self.k))
-    phi_i += self.prior
+    
+    while diff > 1e-10:
+      phi_i.fill(0)
+      phi_i += digamma(gamma_i) - digamma(gamma_i.sum())
+      for j in range(self.M):
+        if self.X[i, j] >= 0:
+          phi_i[j] += self.log_betas[j][:, self.X[i, j]]
+      
+      phi_i = np.exp(phi_i)
+      phi_i = phi_i/np.sum(phi_i, 1, keepdims=True)
+      new_gamma_i = self.alpha + phi_i.sum(0)
+      diff = np.max(np.abs(gamma_i - new_gamma_i)/(new_gamma_i + 1e-10))
+      gamma_i = new_gamma_i
+      
+    phi_i.fill(0)
+    phi_i += digamma(gamma_i) - digamma(gamma_i.sum())
     for j in range(self.M):
-      if X[i, j] >= 0:
-        phi_i[j] += self.log_betas[j][:, X[i, j]]
+      if self.X[i, j] >= 0:
+        phi_i[j] += self.log_betas[j][:, self.X[i, j]]
     
     phi_i = np.exp(phi_i)
     phi_i = phi_i/np.sum(phi_i, 1, keepdims=True)
-    return phi_i
+    gamma_i = self.alpha + phi_i.sum(0)
+    return phi_i, gamma_i
 
 
 def EM_BCE(n_iter, bce, n_threads=None):
@@ -234,7 +264,6 @@ def EM_BCE(n_iter, bce, n_threads=None):
     alpha = alpha - (ghs - c)/lhs
 
     bce.alpha = alpha
-    bce.prior = digamma(alpha) - digamma(alpha.sum())
     bce.log_betas = [np.log(b) for b in betas]
 
 def WorkerEM_BCE(i_list, bce=None):
@@ -242,10 +271,10 @@ def WorkerEM_BCE(i_list, bce=None):
   ghs = 0.
   new_betas = [np.zeros_like(b) for b in bce.log_betas]
   for i in i_list:
-    phi_i = bce.infer_phi_i(i)
-    gamma_i = alpha + phi_i.sum(0)
+    phi_i, gamma_i = bce.infer_phi_i(i)
     for j in range(M):
-      new_betas[j][:, X[i, j]] += phi_i[j]      
+      if bce.X[i, j] >= 0:
+        new_betas[j][:, X[i, j]] += phi_i[j]      
     ghs += digamma(gamma_i) - digamma(gamma_i.sum())
   return new_betas, ghs
 
@@ -281,7 +310,7 @@ if __name__ == '__main__':
       help='Threshold for input genes')
   
   args = parser.parse_args()
-  thr = int(args.thr)
+  thr = int(args.thr[0])
 
   ground_truth_clusters = pickle.load(open('../utils/ref_species_clusters.pkl', 'rb'))
   samples = merge_samples_msp
@@ -302,7 +331,7 @@ if __name__ == '__main__':
   alpha = None
   betas = None
   
-  bce = BCE(X, k, Z_init=Z, sample_weights=sample_weights)
+  bce = BCE(X, k, Z_init=Z, alpha=alpha, betas=betas, weights=sample_weights)
 
   Z_clusters = build_clusters(InferZ_BCE(bce, n_threads=n_threads), gene_names)
   scores = []
