@@ -101,9 +101,9 @@ def initialize_Z(X, seed=None):
             j_assign = np.random.choice(existing_cluster_assignments)
             Z[k] = j_assign
   assert not -1 in Z
-  assert len(np.unique(Z)) == np.max(Z) + 1
+  #assert len(np.unique(Z)) == np.max(Z) + 1
 
-  k = np.max(Z) + 1
+  k = len(np.unique(Z))
   return Z, k
 
 def initialize_Z_spread(X, seed=None):
@@ -345,7 +345,7 @@ if __name__ == '__main__':
   for ct in range(10):
     print("Start fold %d" % ct, flush=True)
     t1 = time.time()
-    EM_BCE(1, bce, n_threads=n_threads)
+    EM_BCE(4, bce, n_threads=n_threads)
     t2 = time.time()
     print("Took %f seconds" % (t2-t1))
     with open('../utils/BCE_save/BCE_save_%d_%d.pkl' % (thr, ct), 'wb') as f:

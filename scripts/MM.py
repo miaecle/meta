@@ -137,7 +137,7 @@ if __name__ == '__main__':
 
   # Cohorts have weight related to their sizes, 0.3 is a scaling factor
   #sample_weights = (np.array(cohort_sizes)/max(cohort_sizes))**(0.3)
-  sample_weights = (consistency_mat ** 4)/(consistency_mat.max() ** 4)
+  sample_weights = (consistency_mat ** 20)/(consistency_mat.max() ** 20)
   
   Z, k = initialize_Z(X, seed=26)
   #Z, k = pickle.load(open('../utils/Z_full_init_123_spreaded.pkl', 'rb'))
